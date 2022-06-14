@@ -1,0 +1,926 @@
+---
+title: "UAS - Jeffrey Widjaya - 01112190022"
+author: "Jeffrey Widjaya"
+date: "4/23/2022"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: show
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+  word_document:
+    toc: yes
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Saya Jeffrey Widjaya, menyatakan bahwa saya mengerjakan soal-soal ini secara mandiri tanpa bantuan orang lain ataupun memberikan bantuan kepada orang lain.
+Jika saya terbukti melakukan kecurangan tersebut (mendapat bantuan dari orang lain ataupun memberi bantuan kepada orang lain) maka saya bersedia untuk tidak lulus dalam mata kuliah ini.
+
+Disini Datanya tidak dilakukan set.seed sehingga pada saat knit hasilnya dapat berubah jika dibandingkan dengan hasil yang terdapat pada file rmd ini.
+
+Gunakanlah data melb_data_clean.csv (diambil dari data melb_data.csv1 yang telah dibersihkan) untuk mengerjakan simulasi dengan dengan ketentuan sebagai berikut:
+
+-   Dependent variable = Price
+-   Independent variables = Semua variable yang dapat dipakai
+-   Gunakan training dan testing set dalam simulasi Linear Based Model
+-   Gunakan training, validation dan testing set dalam simulasi Tree Based Model
+-   Data sudah bersih dan tidak perlu dilakukan data cleaning
+-   Lakukan data exploration secara lengkap dan sertakan semua plot yang ada
+-   Bebas melakukan transformasi, mengubah kategori data, atau menghapus independent variable dalam proses modeling (sertakan alasannya)
+-   Lakukan model analisis dan residual/error analisis lengkap. Untuk error analisis menggunakan comp function yang diberikan sebelumnya, gunakanlah variable asli Price dan hasil prediksi dengan skala awal harga (bukan yang sudah dilakukan transformasi)
+-   Sertakan semua plot yang dihasilkan dari simulasi
+-   Kumpulkan laporan dalam bentuk PDF paling lambat tanggal 28 April 2022 pukul 12.00. Laporan harus berisi alur simulasi yang jelas, menampilkan R code, hasil analisis, plot yang diperlukan, dan kesimpulan.
+-   Penilaian akan dilakukan berdasarkan kelengkapan dan kedalaman analisa masing-masing murid
+-   Nilai tambahan untuk customized plot, extra testing, extra analysis, etc.
+
+# Library yang akan digunakan adalah sebagai berikut
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(caret)
+library(dplyr)
+library(car)
+library(randomForest)
+```
+
+# Loading Data
+
+```{r}
+Data = read.csv("melb_data_clean.csv")
+set.seed(01112190022)
+```
+
+Karna data yang dimiliki sudah bersih dan tidak ada data N/A, namun ada variable variable yang harus derimove karena tidak akan digunakan.
+
+```{r}
+drop = c("ID", "Suburb", "Address", "Method", "SellerG", "Date", "Postcode", "Bedroom2", "Bathroom", "YearBuilt", "Lattitude", "Longtitude", "Propertycount", "SalesYear")
+Data = Data[, !(names(Data) %in% drop)]
+```
+
+Disini kita ada tambahan variable yang di remove yaitu ID dikarenakan ID tugasnya sama seperti Index.
+
+# Data Exploration
+
+```{r}
+summary(Data)
+```
+
+```{r}
+par(mfrow = c(1,2))
+hist(Data$Price)
+hist(log(Data$Price))
+```
+
+Jika kita membandingkan Grafik Price vs Grafik Log(Price) terlihat bahwa Grafik Log Price memberikan return yang lebih mendekati bentuk distribusi normal, sedangkan pada Grafik Price terlihat datanya cukup right skewed.
+
+```{r}
+ks.test(Data$Price, "pnorm")
+```
+
+```{r}
+ggarrange(
+ggqqplot(Data$Price) + ggtitle("Plot Data Price"),
+ggqqplot(log(Data$Price)) + ggtitle("Plot Data Log Price")
+)
+```
+
+Dari Test ks.test dan qqplot data price terlihat bahwa data price tidak berdistribusi normal, maka dari itu seperti hasil pada grafik histogram kita akan menggunakan log pada price karena memberikan return hampir mendekati data distribusi normal.
+
+Akan kita cek apakah terdapat outlier pada log Data Price
+
+```{r}
+boxplot(Data$Price)
+```
+
+Terlihat dari grafik boxplot bahwa log Data Price masih memiliki outlier, oleh karena itu kita akan meremove outlier tersebut dengan menggunakan outlier = (3\*IQR)/1.5
+
+```{r}
+paste("outliers", length(boxplot.stats(Data$Price, coef = 3)$out))
+```
+
+```{r}
+out = boxplot.stats(Data$Price, coef = 3)$out
+out_key = which(Data$Price %in% c(out))
+Data = Data[-out_key, ]
+```
+
+Terlihat bahwa Data Price memiliki total outlier
+
+```{r}
+ggplot(Data) + geom_boxplot(aes(y = Price))
+```
+
+Dependent Variable yang akan digunakan adalah Price.
+Independent Variable yang dapat digunakan adalah sebagai berikut : ID, Suburb, Address, Rooms, Type, Method, SellerG, Date, Distance, Postcode, Bedroom2, Bathrom, Car, Landsize, BuildingArea, YearBuilt, CouncilArea, Lattitude, Longitude, Regionname, Propertycount, SalesYear, EffAge.
+
+```{r}
+print("table Type")
+table(Data$Type)
+
+print("table Car")
+table(Data$Car)
+
+print("table CouncilArea")
+table(Data$CouncilArea)
+
+print("table Regionname")
+table(Data$Regionname)
+```
+
+```{r}
+print("Summary Rooms")
+summary(Data$Rooms)
+
+print("Summary Distance")
+summary(Data$Distance)
+
+print("Summary Landsize")
+summary(Data$Landsize)
+
+print("Summary BuildingArea")
+summary(Data$BuildingArea)
+
+print("Summary EffAge")
+summary(Data$EffAge)
+```
+
+Sekarang kita akan mengecek Korelasi antara Dependent Variable vs Independent Variable
+
+```{r}
+print("Correlation Price vs Rooms")
+cor(Data$Price, Data$Rooms)
+
+print("Correlation Price vs Distance")
+cor(Data$Price, Data$Distance)
+
+print("Correlation Price vs Landsize")
+cor(Data$Price, Data$Landsize)
+print("Correlation Price vs BuildingArea")
+cor(Data$Price, Data$BuildingArea)
+
+print("Correlation Price vs EffAge")
+cor(Data$Price, Data$EffAge)
+```
+
+Jika dilihat dari hasil correlasi antara Dependent variable vs Independent variable, dapat dikategorikan sebagai berikut :
+
+-   Price vs (Landsize) masuk kedalam kategori sangat lemah
+-   Price vs (Distance, EffAge) masuk kedalam kategori korelasi lemah
+-   Price vs (Rooms, BuildingArea) masuk ke dalam kategori korelasi medium
+
+Akan diperlihatkan plot dari korelasi dependent variable vs independent variable
+
+```{r}
+ggarrange(
+ggplot(Data) + geom_point(aes(x = Rooms, y = Price)),
+ggplot(Data) + geom_point(aes(x = Type, y = Price)),
+ggplot(Data) + geom_point(aes(x = Distance , y = Price)),
+ggplot(Data) + geom_point(aes(x = Car, y = Price)),
+ggplot(Data) + geom_point(aes(x = Landsize, y = Price)),
+ggplot(Data) + geom_point(aes(x = BuildingArea, y = Price)),
+ggplot(Data) + geom_point(aes(x = CouncilArea, y = Price)),
+ggplot(Data) + geom_point(aes(x = Regionname, y = Price)),
+ggplot(Data) + geom_point(aes(x = EffAge, y = Price))
+)
+```
+
+Plot ini juga akan memberikan kesimpulan yang sama atas korelasi, hanya saja dengan plot akan lebih mempermudah visualisasi hubungan antara data dependent vs independent variable.
+
+# Clustering
+
+-   Gunakan K-Means Clustering untuk membuat 3 cluster baru, dan gunakan variable baru ini dalam pemodelan.
+-   Perlu diingat bahwa dengan melakukan clustering, variable lokasi (CouncilArea dan Regionname) mungkin saja tidak akan terpakai lagi.
+
+```{r}
+Model1 <- Data
+summary(Model1)
+```
+
+```{r}
+Model1$Type <- as.factor(Model1$Type)
+Model1$Type <- as.numeric(Model1$Type)
+
+Model1$Car <- as.factor(Model1$Car)
+Model1$Car <- as.numeric(Model1$Car)
+
+Model1$CouncilArea <- as.factor(Model1$CouncilArea)
+Model1$CouncilArea <- as.numeric(Model1$CouncilArea)
+
+Model1$Regionname <- as.factor(Model1$Regionname)
+Model1$Regionname <- as.numeric(Model1$Regionname)
+
+head(Model1)
+summary(Model1)
+```
+
+### Clustering dengan 3 Cluster
+
+```{r}
+k = kmeans(Model1, 3, nstart = 250)
+```
+
+Membangun k mean clustering dengan center 3 dan nilai center tersebut minimal ada 100.
+
+```{r}
+par(mfrow = c(3,4))
+plot(Model1$Price, Model1$ID, col = k$cluster)
+plot(Model1$Price, Model1$Rooms, col = k$cluster)
+plot(Model1$Price, Model1$Type, col = k$cluster)
+plot(Model1$Price, Model1$Distance, col = k$cluster)
+plot(Model1$Price, Model1$Car, col = k$cluster)
+plot(Model1$Price, Model1$Landsize, col = k$cluster)
+plot(Model1$Price, Model1$BuildingArea, col = k$cluster)
+plot(Model1$Price, Model1$CouncilArea, col = k$cluster)
+plot(Model1$Price, Model1$Regionname, col = k$cluster)
+plot(Model1$Price, Model1$EffAge, col = k$cluster)
+```
+
+Terlihat dari Grafik Clustering antara dependent variable vs independet variable dengan center = 3.
+secara keseluruhan klustering sudah terbagi dengan baik, namun jika kita melihat pada clustering Price vs Building Area dan Landscape terlihat masih ada terdapat outlier namun itu tidak apa dan wajar.
+
+# Linear Based Model
+
+-   Jelaskan asumsi yang dibutuhkan oleh model dan cek apakah data memenuhi asumsi.
+-   Buatlah model untuk keseluruhan data.
+
+Asumsi yang akan digunakan untuk model GLM : \* Independent untuk setiap data.
+\* Penggunaan Link Function yang benar.
+
+### Split Train dan Test
+
+Pada tahap ini akan di split keseluruhan data dengan perbandingan menjadi 8:2
+
+```{r}
+Model2 <- Model1
+Model2$k <- k$cluster
+summary(Model2)
+```
+
+```{r}
+Partition2 = createDataPartition(Model2$Type, p = 0.8, list = FALSE)
+Trainset2 = Model2[Partition2,]
+Testset2 = Model2[-Partition2,]
+
+
+rbind("Original Data" = table(Data$Type),
+      "Trainset" = table(Trainset2$Type),
+      "Testset" = table(Testset2$Type)
+)
+```
+
+Dapat dilihat bahwa proses splitting Train dan Test set kita sudah baik, sudah terbagi dengan rata dengan perbandingan 8:2
+
+```{r}
+summary(Trainset2)
+```
+
+```{r}
+summary(Testset2)
+```
+
+## Model GLM tanpa menggunakan value clustering
+
+Membangun Model Regresi Generalized Linear Model menggunakan Trainset2
+
+ingat bahwa Price memberikan return model Pricing yang lebih baik dibandingkan hanya menggunakan log(Price) seperti pada grafik histogram yang sudah ada, oleh karena itu akan kita gunakan log(Price).
+
+```{r}
+ModelGLM_1 = glm(log(Price)~. -k, family = gaussian, data = Trainset2)
+summary(ModelGLM_1)
+```
+
+```{r}
+ModelGLM_1$aic
+```
+
+```{r}
+par(mfrow = c(1,2))
+plot(ModelGLM_1$fitted.values, ModelGLM_1$residuals, main = "Fitted vs Residual")
+plot(ModelGLM_1$fitted.values, ModelGLM_1$y, main = "Fitted vs Dependent Variable")
+```
+
+Jika dilihat secara visual Fitted Value vs Residual terlihat bahwa pada model ini tidak ada terjadinya heteroskedastisitas.
+
+Akan dilakukan pengujian model GLM terhadap train data set
+
+```{r}
+ggplot() +
+  geom_point(aes(x = ModelGLM_1$fitted.values,
+                 y = log(Trainset2$Price))) +
+  geom_abline(aes(intercept = 0, slope = 1, colour = "red")) +
+  ggtitle("Log Sale Price vs Prediction - Training Set, Outliers not Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y = "Log Sales Price")
+```
+
+```{r}
+ResidualStandardized = data.frame(x = rstandard(ModelGLM_1))
+prediction_ModelGLM_1 = ModelGLM_1$fitted.value
+```
+
+```{r}
+ggplot() +
+  geom_point(aes(x = ModelGLM_1$fitted.values, y = ResidualStandardized$x)) +
+  geom_abline(aes(intercept = 0, slope = 0), colour = "blue") +
+  ggtitle("Residual vs Prediction - Training Set, Outliers not Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y ="Residual")
+```
+
+```{r}
+bin = which(abs(ResidualStandardized)>3) #simpan data row yang menjadi outliers
+
+#Data outlier dibuang dari Trainset2
+if(length(bin)>0) {
+  train.outliers = Trainset2
+  train.outliers$outliers = 0
+  train.outliers$outliers[bin] = 1
+  train.outliers$pred = ModelGLM_1$fitted.values
+  train.outliers$pred.dollar = exp(train.outliers$pred)
+  Trainset3 = Trainset2[-bin,]
+} else {
+  Trainset3 = Trainset2
+}
+```
+
+Finalisasi ModelGLM_1
+
+```{r}
+FinalModelGLM_1 = glm(log(Price)~. -k,
+                      family = gaussian, 
+                      data = Trainset3)
+summary(FinalModelGLM_1)
+```
+
+```{r}
+FinalModelGLM_1$aic
+```
+
+dilihat dari ModelGLM dan FinalModelGLM bahwa FinalModelGLM telah menghasilkan nilai AIC yang lebih rendah dikarenakan outlier yang masih terdapat pada sudah di remove, AIC yang lebih rendah ini juga menandakan bahwa FinalModelGLM_1 merupakan model yang lebih fit dibandingkan ModelGLM_1.
+
+```{r}
+ResidualStandardized.2 = data.frame(x = rstandard(FinalModelGLM_1))
+Prediction_FinalModelGLM_1 = FinalModelGLM_1$fitted.values
+```
+
+```{r}
+ggplot() + geom_point(aes(x = FinalModelGLM_1$fitted.values, y = log(Trainset3$Price))) +
+  geom_abline(aes(intercept = 0, slope=1), colour = "blue") +
+  ggtitle("Log SalePrice vs Prediction - Training Set, Outliers Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y ="Log Sales Price")
+```
+
+```{r}
+ggplot() + geom_point(aes(x=FinalModelGLM_1$fitted.values, y=ResidualStandardized.2$x)) +
+  geom_abline(aes(intercept = 0, slope = 0), colour = "blue") +
+  ggtitle("Residual vs Prediction - Training Set, Outliers Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y ="Residual")
+```
+
+Check for multicollinearity
+
+```{r}
+vif(FinalModelGLM_1)
+```
+
+Variance Inflation Factor digunakan untuk mengecek multikolinearitas pada model, melalu VIF tersebut kita juga dapat melihat bahwa rata rata data kita memiliki VIF \< 4.
+Maka dari itu kita juga dapat menarik kesimpulan bahwa setiap independent variable bukan merupakan kombinasi linear dari variable independent lainnya, kita juga dapat mengatakan bahwa tidak ada hubungan antara independent variable.
+
+Eror Analysis Function
+
+```{r}
+comp <- function(pred, obs){
+  n = length(obs)
+  rsq = cor(pred,obs)^2
+  mse = sum((pred - obs)^2)/n
+  semse = sd((pred - obs)^2) / sqrt(n)
+  rmse = sqrt(mse)
+  se = sd(pred-obs) / sqrt(n)
+  mae = sum(abs(pred-obs))/n
+  mape = sum(abs(pred-obs)/obs)/n*100
+  return(list("n"=n,"R2"=rsq,"MSE"=mse,"SEMSE"=semse,"RMSE"=rmse,"SE"=se,"MAE"=mae,"MAPE"=mape))
+}
+```
+
+### Error Analysis on Trainset
+
+Akan digabungkan ke dalam 1 tabel untuk hasil Error Analysis dengan menggunakan model price setelah di log dan sebelum di log
+
+```{r}
+merge(
+stack(comp(FinalModelGLM_1$fitted.values, FinalModelGLM_1$y)),
+stack(comp(exp(FinalModelGLM_1$fitted.values), Trainset3$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+Value.x merepresentasikan nilai model dengan price yang sudah di log, sedangkan values.y merepresentasikan nilai model dengan price normal atau sebelum di log.
+
+Telah ditunjukan untuk nilai Error Analysis, sekarang kita akan melihat lebih spesifik untuk nilai RMSE dan MAPE model.
+Nilai RMSE untuk model Price setelah di log = 3.152247e-01 \< Nilai RMSE untuk model Price normal = 4.136482e+05.
+Nilai MAPE untuk model Price setelah di log = 1.842402e+00 \< Nilai MAPE untuk model Price normal = 2.624866e+01.
+
+RMSE dan MAPE mengindikasikan bahwa semakin kecil nilai RMSE dan MAPE maka model yang digunakan semakin fit, artinya benar bahwa dugaan kita untuk menggunakan log pada Price (menormalkan distribusi Price) dikarenakan memberikan nilai fit yang lebih baik dibandingkan jika tidak menggunakan log pada price (distribusi price tidak normal).
+
+### Error Analysis on Testset
+
+```{r}
+Testset2$Prediction = predict(FinalModelGLM_1, newdata = Testset2)
+```
+
+Akan digabungkan ke dalam 1 tabel untuk hasil Error Analysis dengan menggunakan model price setelah di log dan sebelum di log
+
+```{r}
+merge(
+stack(comp(Testset2$Prediction, log(Testset2$Price))),
+stack(comp(exp(Testset2$Prediction), Testset2$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+Value.x merepresentasikan nilai model dengan price yang sudah di log, sedangkan values.y merepresentasikan nilai model dengan price normal atau sebelum di log.
+
+Telah ditunjukan untuk nilai Error Analysis, sekarang kita akan melihat lebih spesifik untuk nilai RMSE dan MAPE model.
+Nilai RMSE untuk model Price setelah di log = 3.390428e-01 \< Nilai RMSE untuk model Price normal = 4.350853e+05.
+Nilai MAPE untuk model Price setelah di log = 1.931845e+00 \< Nilai MAPE untuk model Price normal = 2.850099e+01.
+
+RMSE dan MAPE mengindikasikan bahwa semakin kecil nilai RMSE dan MAPE maka model yang digunakan semakin fit, artinya benar bahwa dugaan kita untuk menggunakan log pada Price (menormalkan distribusi Price) dikarenakan memberikan nilai fit yang lebih baik dibandingkan jika tidak menggunakan log pada price (distribusi price tidak normal).
+
+### Error Analysis Comparing Trainset and Testset
+
+Error Analysis dengan menggunakan model yang sudah di log price antara Trainset dan Testset.
+
+```{r}
+merge(
+stack(comp(FinalModelGLM_1$fitted.values, FinalModelGLM_1$y)),
+stack(comp(Testset2$Prediction, log(Testset2$Price))),
+by = "ind", sort = FALSE
+)
+```
+
+Hasil Error Analysis pada model yang menggunakan log price pada data Trainset dan Testset, terlihat bahwa untuk model ini pada Train dan Testset tidak ada jauh perbedaan pada hasil RMSE dan MAPE yang di hasilkan, hasil yang dilakukan pada Trainset juga tergambarkan pada Testset.
+
+Values.x merepresentasikan Trainset dan Values.y merepresentasikan Testset, perbedaannya kecil namun ada alasan dibalik perbedaan itu, pada model Trainset sudah dilakukan proses peremovean outlier dan residu oleh karena itu hasilnya dapat menjadi lebih bagus.
+Namun, return values.x dan values.y sama sama sudah bagus.
+
+Error Analysis dengan menggunakan model yang sudah di price normal antara Trainset dan Testset.
+
+```{r}
+merge(
+stack(comp(exp(FinalModelGLM_1$fitted.values), Trainset3$Price)),
+stack(comp(exp(Testset2$Prediction), Testset2$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+Hasil Error Analysis pada model yang menggunakan Price normal pada data Trainset dan Testset, terlihat bahwa untuk model ini pada Train dan Testset ada perbedaan yang kecil pada RMSE dan MAPE yang di hasilkan.
+
+Values.x merepresentasikan Trainset dan Values.y merepresentasikan Testset, pada model Trainset sudah dilakukan proses peremovean outlier dan residu oleh karena itu hasilnya dapat menjadi lebih bagus.
+Namun, return values.x dan values.y sama sama sudah bagus.
+
+## Model GLM dengan menggunakan value Clustering
+
+Membangun Model Regresi Generalized Linear Model menggunakan Trainset2.
+
+ingat bahwa Price memberikan return model Pricing yang lebih baik dibandingkan hanya menggunakan log(Price) seperti pada grafik histogram yang sudah ada, oleh karena itu akan kita gunakan log(Price).
+
+```{r}
+ModelGLM_2 = glm(log(Price)~., family = gaussian, data = Trainset2)
+summary(ModelGLM_2)
+```
+
+```{r}
+ModelGLM_2$aic
+```
+
+```{r}
+par(mfrow = c(1,2))
+plot(ModelGLM_2$fitted.values, ModelGLM_2$residuals, main = "Fitted vs Residual")
+plot(ModelGLM_2$fitted.values, ModelGLM_2$y, main = "Fitted vs Dependent Variable")
+```
+
+Terlihat dengan jelas melalui Grafik diatas bahwa ketika Model kita menganut variable cluster maka model GLM nya akan terbagi menjadi cluster juga, dalam kasus ini kita menggunakan 3 cluster, sudah terlihat perbedaan antara grafik GLM dengan cluster dan tanpa cluster.
+
+Akan dilakukan pengujian model GLM terhadap train data set
+
+```{r}
+ggplot() +
+  geom_point(aes(x = ModelGLM_2$fitted.values,
+                 y = log(Trainset2$Price))) +
+  geom_abline(aes(intercept = 0, slope = 1, colour = "red")) +
+  ggtitle("Log Sale Price vs Prediction - Training Set, Outliers not Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y = "Log Sales Price")
+```
+
+```{r}
+ResidualStandardized_2 = data.frame(x = rstandard(ModelGLM_2))
+prediction_ModelGLM_2 = ModelGLM_2$fitted.value
+```
+
+```{r}
+ggplot() +
+  geom_point(aes(x = ModelGLM_2$fitted.values, y = ResidualStandardized_2$x)) +
+  geom_abline(aes(intercept = 0, slope = 0), colour = "blue") +
+  ggtitle("Residual vs Prediction - Training Set, Outliers not Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y ="Residual")
+```
+
+```{r}
+bin_2 = which(abs(ResidualStandardized_2)>3) #simpan data row yang menjadi outliers
+
+#Data outlier dibuang dari Trainset2
+if(length(bin_2)>0) {
+  train.outliers = Trainset2
+  train.outliers$outliers = 0
+  train.outliers$outliers[bin] = 1
+  train.outliers$pred = ModelGLM_2$fitted.values
+  train.outliers$pred.dollar = exp(train.outliers$pred)
+  Trainset4 = Trainset2[-bin_2,]
+} else {
+  Trainset4 = Trainset2
+}
+```
+
+Finalisasi ModelGLM_2
+
+```{r}
+FinalModelGLM_2 = glm(log(Price)~.,
+                      family = gaussian, 
+                      data = Trainset4)
+summary(FinalModelGLM_2)
+```
+
+```{r}
+FinalModelGLM_2$aic
+```
+
+Disini kita melihat bahwa nilai AIC yang dihasilkan oleh kedua model kita adala negatif, namun hal ini wajar dikarenakan rumus yang digunakan untuk menghitung AIC = 2K-ln(L), terlihat juga bahwa nilai AIC untuk FinalModelGLM_2 lebih bagus, ini juga menandakan bahwa FinalModelGLM_2 merupakan model yang lebih fit memodelkan dibandingkan ModelGLM_2.
+
+```{r}
+ResidualStandardized_2.2 = data.frame(x = rstandard(FinalModelGLM_2))
+Prediction_FinalModelGLM_2 = FinalModelGLM_2$fitted.values
+```
+
+```{r}
+ggplot() + geom_point(aes(x = FinalModelGLM_2$fitted.values, y = log(Trainset4$Price))) +
+  geom_abline(aes(intercept = 0, slope=1), colour = "blue") +
+  ggtitle("Log SalePrice vs Prediction - Training Set, Outliers Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y ="Log Sales Price")
+```
+
+```{r}
+ggplot() + geom_point(aes(x=FinalModelGLM_2$fitted.values, y=ResidualStandardized_2.2$x)) +
+  geom_abline(aes(intercept = 0, slope = 0), colour = "blue") +
+  ggtitle("Residual vs Prediction - Training Set, Outliers Removed") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Prediction on Train Data", y ="Residual")
+```
+
+Check for multicollinearity
+
+```{r}
+vif(FinalModelGLM_2)
+```
+
+Variance Inflation Factor digunakan untuk mengecek multikolinearitas pada model, melalu VIF tersebut kita juga dapat melihat bahwa rata rata data kita memiliki VIF \< 4.
+Maka dari itu kita juga dapat menarik kesimpulan bahwa setiap independent variable bukan merupakan kombinasi linear dari variable independent lainnya, kita juga dapat mengatakan bahwa tidak ada hubungan antara independent variable.
+
+Eror Analysis Function
+
+```{r}
+comp <- function(pred, obs){
+  n = length(obs)
+  rsq = cor(pred,obs)^2
+  mse = sum((pred - obs)^2)/n
+  semse = sd((pred - obs)^2) / sqrt(n)
+  rmse = sqrt(mse)
+  se = sd(pred-obs) / sqrt(n)
+  mae = sum(abs(pred-obs))/n
+  mape = sum(abs(pred-obs)/obs)/n*100
+  return(list("n"=n,"R2"=rsq,"MSE"=mse,"SEMSE"=semse,"RMSE"=rmse,"SE"=se,"MAE"=mae,"MAPE"=mape))
+}
+```
+
+### Error Analysis on Trainset
+
+Akan digabungkan ke dalam 1 tabel untuk hasil Error Analysis dengan menggunakan model price setelah di log dan sebelum di log
+
+```{r}
+merge(
+stack(comp(FinalModelGLM_2$fitted.values, FinalModelGLM_2$y)),
+stack(comp(exp(FinalModelGLM_2$fitted.values), Trainset4$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+Value.x merepresentasikan nilai model dengan price yang sudah di log, sedangkan values.y merepresentasikan nilai model dengan price normal atau sebelum di log.
+
+Telah ditunjukan untuk nilai Error Analysis, sekarang kita akan melihat lebih spesifik untuk nilai RMSE dan MAPE model.
+Nilai RMSE untuk model Price setelah di log = 2.038640e-01 \< Nilai RMSE untuk model Price normal = 2.250278e+05.
+Nilai MAPE untuk model Price setelah di log = 1.198783e+00 \< Nilai MAPE untuk model Price normal = 1.682360e+01.
+
+RMSE dan MAPE mengindikasikan bahwa semakin kecil nilai RMSE dan MAPE maka model yang digunakan semakin fit, artinya benar bahwa dugaan kita untuk menggunakan log pada Price (menormalkan distribusi Price) dikarenakan memberikan nilai fit yang lebih baik dibandingkan jika tidak menggunakan log pada price (distribusi price tidak normal).
+
+### Error Analysis on Testset
+
+```{r}
+Testset4 <- Testset2
+Testset4$Prediction = predict(FinalModelGLM_2, newdata = Testset4)
+```
+
+Akan digabungkan ke dalam 1 tabel untuk hasil Error Analysis dengan menggunakan model price setelah di log dan sebelum di log
+
+```{r}
+merge(
+stack(comp(Testset4$Prediction, log(Testset4$Price))),
+stack(comp(exp(Testset4$Prediction), Testset4$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+Value.x merepresentasikan nilai model dengan price yang sudah di log, sedangkan values.y merepresentasikan nilai model dengan price normal atau sebelum di log.
+
+Telah ditunjukan untuk nilai Error Analysis, sekarang kita akan melihat lebih spesifik untuk nilai RMSE dan MAPE model.
+Nilai RMSE untuk model Price setelah di log = 2.051907e-01 \< Nilai RMSE untuk model Price normal = 2.111228e+05.
+Nilai MAPE untuk model Price setelah di log = 1.198178e+00 \< Nilai MAPE untuk model Price normal = 1.686434e+01.
+
+RMSE dan MAPE mengindikasikan bahwa semakin kecil nilai RMSE dan MAPE maka model yang digunakan semakin fit, artinya benar bahwa dugaan kita untuk menggunakan log pada Price (menormalkan distribusi Price) dikarenakan memberikan nilai fit yang lebih baik dibandingkan jika tidak menggunakan log pada price (distribusi price tidak normal).
+
+### Error Analysis Comparing Trainset and Testset
+
+Error Analysis dengan menggunakan model yang sudah di log price antara Trainset dan Testset.
+
+```{r}
+merge(
+stack(comp(FinalModelGLM_2$fitted.values, FinalModelGLM_2$y)),
+stack(comp(Testset4$Prediction, log(Testset4$Price))),
+by = "ind", sort = FALSE
+)
+```
+
+Hasil Error Analysis pada model yang menggunakan log price pada data Trainset dan Testset, terlihat bahwa untuk model ini pada Train dan Testset tidak ada jauh perbedaan pada hasil RMSE dan MAPE yang di hasilkan, hasil yang dilakukan pada Trainset juga tergambarkan pada Testset.
+
+Values.x merepresentasikan Trainset dan Values.y merepresentasikan Testset, perbedaannya kecil namun ada alasan dibalik perbedaan itu, pada model Trainset sudah dilakukan proses peremovean outlier dan residu oleh karena itu hasilnya dapat menjadi lebih bagus.
+Namun, return values.x dan values.y sama sama sudah bagus.
+
+Error Analysis dengan menggunakan model yang sudah di price normal antara Trainset dan Testset.
+
+```{r}
+merge(
+stack(comp(exp(FinalModelGLM_2$fitted.values), Trainset4$Price)),
+stack(comp(exp(Testset4$Prediction), Testset4$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+Hasil Error Analysis pada model yang menggunakan Price normal pada data Trainset dan Testset, terlihat bahwa untuk model ini pada Train dan Testset ada perbedaan yang cukup besar pada RMSE dan MAPE yang di hasilkan.
+
+Values.x merepresentasikan Trainset dan Values.y merepresentasikan Testset, pada model Trainset sudah dilakukan proses peremovean outlier dan residu oleh karena itu hasilnya dapat menjadi lebih bagus.
+Namun, return values.x dan values.y sama sama sudah bagus.
+
+# Tree Based Model
+
+-   Pilih Model Random Forest.
+-   Buatlah model untuk keseluruhan data.
+-   Lakukan 10-fold Cross Validation untuk menentukan optimum parameter Tree Based Model
+-   Random Forest = ntree saja yang di optimize.
+-   Gunakan p/3 untuk mtry dimana p adalah jumlah independent variable yang dipakai pada model kalian.
+
+## Random Forest without clustering
+
+```{r}
+Model3 <- Model1
+summary(Model3)
+```
+
+```{r}
+Model3$folds = createFolds(Model3$Type, 
+                                 k = 10, 
+                                 list = FALSE, 
+                                 returnTrain = FALSE)
+
+Trainset5 = Model3[Model3$folds != 10,]
+Testset5 = Model3[Model3$folds == 10,]
+```
+
+Trainset akan dipecah menjadi 10 Folds lagi untuk tujuan Cross Validation
+
+```{r}
+drop = c("folds", "folds2")
+Trainset5$folds2 = createFolds(Trainset5$Type,
+                               k = 10,
+                               list = FALSE,
+                               returnTrain = FALSE)
+```
+
+```{r}
+MAPE = NULL
+n.tree = c(3,5,10,15,25,50,100,200,400,800,1000)
+p = 9
+m.try = p/3
+
+MAPE.ave = matrix(, nrow = length(n.tree), ncol = length(m.try))
+```
+
+```{r}
+rownames(MAPE.ave) = n.tree
+colnames(MAPE.ave) = m.try
+
+
+for (j in 1:length(n.tree)){
+  t = n.tree[j]
+  for(k in 1:length(m.try)){
+    m = m.try[k]
+    for (i in 1:10){
+      Trainset6 = Trainset5[Trainset5$folds2 != i, ]
+      ValidationSet = Trainset5[Trainset5$folds2 == i, ]
+      
+      ## buat tree pada masing2 train.set, lihat error di val.set
+      rf = randomForest(formula = Price ~  ., 
+                        data = Trainset6[, !names(Trainset6) %in% drop], 
+                        mtry = m, ntree = t)
+      
+      ## error pada validation set
+      ValidationSet$Prediction = predict(rf, ValidationSet)
+      MAPE[i] = comp(ValidationSet$Prediction, ValidationSet$Price)$MAPE
+    }
+    MAPE.ave[j,k] = mean(MAPE)
+  }
+}
+MAPE.ave
+```
+
+Dari hasil MAPE terlihat bahwa pada ntree = 100 dan seterusnya perubahan yang terjadi pada MAPE pada random forest sudah mulai masuk kedalam nilai optimal terlihat dari perubahan pada tree 100 dan 800 tidak jauh berbeda masih didalam range 16.
+
+```{r}
+opt.ntree = 1000
+opt.m = p/3
+
+rf.final_1 = randomForest(formula = Price~., 
+                        data = Trainset5[, !names(Trainset5) %in% drop], 
+                        mtry = opt.m, 
+                        ntree = opt.ntree)
+```
+
+```{r}
+Testset5$Prediction = predict(rf.final_1, newdata = Testset5)
+comp(Testset5$Prediction, Testset5$Price)
+```
+
+Terlihat dari Return nilai MAPE = 15.44437 bahwa hasil MAPE ini masuk ke dalam kategori Bagus dimana MAPE \< 20% tanpa data adanya kehadiran data N/A.
+
+```{r}
+plot(rf.final_1)
+```
+
+## Random Forest Model with Clustering Variable
+
+```{r}
+Model4 <- Model2
+summary(Model4)
+```
+
+```{r}
+Model4$folds = createFolds(Model4$Type, 
+                                 k = 10, 
+                                 list = FALSE, 
+                                 returnTrain = FALSE)
+
+Trainset7 = Model4[Model4$folds != 10,]
+Testset7 = Model4[Model4$folds == 10,]
+```
+
+Trainset akan dipecah menjadi 10 Folds lagi untuk tujuan Cross Validation
+
+```{r}
+drop = c("folds", "folds2")
+Trainset7$folds2 = createFolds(Trainset7$Type,
+                               k = 10,
+                               list = FALSE,
+                               returnTrain = FALSE)
+```
+
+```{r}
+MAPE = NULL
+n.tree = c(3,5,10,15,25,50,100,200,400,800,1000)
+p = 10
+m.try = p/3
+
+MAPE.ave = matrix(, nrow = length(n.tree), ncol = length(m.try))
+```
+
+```{r}
+rownames(MAPE.ave) = n.tree
+colnames(MAPE.ave) = m.try
+
+
+for (j in 1:length(n.tree)){
+  t = n.tree[j]
+  for(k in 1:length(m.try)){
+    m = m.try[k]
+    for (i in 1:10){
+      Trainset8 = Trainset7[Trainset7$folds2 != i, ]
+      ValidationSet_2 = Trainset7[Trainset7$folds2 == i, ]
+      
+      ## buat tree pada masing2 train.set, lihat error di val.set
+      rf = randomForest(formula = Price ~  ., 
+                        data = Trainset8[, !names(Trainset8) %in% drop], 
+                        mtry = m, ntree = t)
+      
+      ## error pada validation set
+      ValidationSet_2$Prediction = predict(rf, ValidationSet_2)
+      MAPE[i] = comp(ValidationSet_2$Prediction, ValidationSet_2$Price)$MAPE
+    }
+    MAPE.ave[j,k] = mean(MAPE)
+  }
+}
+MAPE.ave
+```
+
+Dari hasil MAPE terlihat bahwa pada ntree = 25 dan seterusnya perubahan yang terjadi pada MAPE pada random forest sudah mulai masuk kedalam nilai optimal terlihat dari perubahan pada tree 25 dan 800 tidak jauh berbeda masih didalam range 12.
+
+```{r}
+opt.ntree = 1000
+opt.m = p/3
+
+rf.final_2 = randomForest(formula = Price~., 
+                        data = Trainset7[, !names(Trainset7) %in% drop], 
+                        mtry = opt.m, 
+                        ntree = opt.ntree)
+```
+
+```{r}
+Testset7$Prediction = predict(rf.final_2, newdata = Testset7)
+comp(Testset7$Prediction, Testset7$Price)
+```
+
+Terlihat dari Return nilai MAPE = 11.77752 bahwa hasil MAPE ini masuk ke dalam kategori Bagus dimana MAPE \< 20% tanpa data adanya kehadiran data N/A.
+
+```{r}
+plot(rf.final_2)
+```
+
+### Comparing Comp Function on RandomForest without Clustering and with Clustering.
+
+```{r}
+merge(
+stack(comp(Testset5$Prediction, Testset5$Price)),
+stack(comp(Testset7$Prediction, Testset7$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+values.x merepresentasikan model random forest tanpa variable clustering, values.y merepresentasikan model random forest dengan variable clustering pada testset.
+Terlihat bahwa model MAPE pada model values.y lebih bagus dibandingkan values.x, MAPE mengindikasikan bahwa error dalam prediksi sebesar 1.177752e+01, begitu juga jika dilihat dari nilai RMSE tertera bahwa RMSE untuk model random forest dengan variable clustering merupakan model yang lebih fit.
+
+# Kesimpulan
+
+-   Data log(Price) lebih bagus dalam menggambarkan data jika dibandingkan dengan hanya menggunakan Price seperti yang sudah tertera pada qqplot bahwa Price tidak terdistribusi dengan normal.
+-   Price vs (Landsize) masuk kedalam kategori sangat lemah
+-   Price vs (Distance, EffAge) masuk kedalam kategori korelasi lemah
+-   Price vs (Rooms, BuildingArea) masuk ke dalam kategori korelasi medium
+-   Pada Model Clustering dengan center = 3 dan nstart = 250, model clustering tervisualisasi dengan baik, setiap pointer dapat menemukan cluster dimana mereka seharusnya berada.
+-   Asumsi yang digunakan dalam model tergambar dengan baik.
+-   Dari Plot Fitted Values vs Residual terlihat bahwa model ini tidak mengandung unsur heteroskedastisitas.
+-   Melalui fungsi vif terlihat bahwa setiap independent variable bukan merupakan kombinasi linear dari variable independent lainnya, kita juga dapat mengatakan bahwa tidak ada hubungan antara independent variable.
+
+```{r}
+print("Prediksi skala awal harga sebelum dilakukan transformasi untuk GLM Tidak Clustering dan GLM Clustering")
+cbind(comp(exp(FinalModelGLM_1$fitted.values), Trainset3$Price),
+      comp(exp(Testset2$Prediction), Testset2$Price),
+      comp(exp(FinalModelGLM_2$fitted.values), Trainset4$Price),
+      comp(exp(Testset4$Prediction), Testset4$Price))
+
+```
+
+-   [,1] dan [,2] merepresentasikan Model GLM Tidak Clustering secara berurut dari Trainset dan Testset.
+-   [,3] dan [,4] merepresentasikan Model GLM Clustering secara berurut dari Trainset dan Testset.
+-   Terlihat bahwa model GLM dengan menggunakan Clustering akan memberikan return fit model yang lebih baik jika dibandingan dengan tanpa clustering, Error dalam memprediksi GLM dengan clustering dapat dikategorikan kedalam kategori baik dikarenakan MAPE \< 20%, dan dari RMSE juga memberikan return Model Clustering lebih fit dalam memodelkan dataset.
+-   Model Tree Random Forest dilakukan dengan tanpa variable Clusering dan dengan variable Clustering, terlihat oleh table perbandingan yang telah dibikin bahwa Random Tree model dengan variable clustering memberikan return model yang lebih fit dan dengan Error prediksi yang lebih kecil dibandingan dengan tanpa variable clustering.
+
+Apakah Linear Based Model / Additive Model lebih cocok untuk data ini dibandingkan dengan Tree Based Model?
+
+```{r}
+merge(
+stack(comp(Testset7$Prediction, Testset7$Price)),
+stack(comp(exp(Testset4$Prediction), Testset4$Price)),
+by = "ind", sort = FALSE
+)
+```
+
+values.x merepresentasikan model GLM Clustering dan values.y merepresentasikan model Random Forest Clustering.
+Jika kita lihat dari hasilnya terlihat bahwa untuk data ini akan lebih cocok jika digunakan model Linear Based Model, namun jika kita menggunakan Linear Based Model ada hal hal yang harus dipenuhi dimana pada model GLM yang telah dilakukan sudah terpenuhi, hal hal tersebut adalah prediktor variable harus tidak berkorelasi, menghilangkan outlier karena jika masih ada outlier pada model Linear maka hasilnya bisa menjadi tidak valid.
